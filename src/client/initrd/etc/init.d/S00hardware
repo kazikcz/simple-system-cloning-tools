@@ -1,0 +1,14 @@
+#!/bin/sh
+
+echo -n "Detecting hardware and loading modules.. "
+find /sys -name modalias \
+	| xargs cat \
+	| sort -u \
+	| xargs -n1 modprobe \
+	>/dev/null \
+	2>/dev/null
+
+lsmod \
+	| sed 1d \
+	| awk '{print $1}' \
+	| xargs

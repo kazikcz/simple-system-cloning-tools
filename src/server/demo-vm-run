@@ -1,0 +1,6 @@
+#!/bin/sh
+export ssh_opts="-i demo-key"
+export image="$1"
+
+shift
+./vm-run "$@"

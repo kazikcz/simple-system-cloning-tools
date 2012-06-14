@@ -1,0 +1,5 @@
+#!/bin/sh
+./vm-run "
+	echo Removing SSH host keys..
+	rm /etc/ssh/ssh_host_*
+"

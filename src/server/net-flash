@@ -1,0 +1,170 @@
+#!/bin/sh
+usage() {
+	cat <<EOF >&2
+usage: env option1=value1 option2=value2 $0
+
+Program uses environmental variables for configuration:
+
+   machines       (required) list of space-delimited IPs or hostnames to flash
+   script         (required) path to a flashing script (see below)
+   AMT_PASSWORD   (required) Intel AMT admin password
+   iface          (optional) specifies an interface to run udp-sender on
+                             recommended if more than one network interface
+                             is present
+   tx_timeout     (optional) abort if udp-sender does not see required
+                             receivers soon enough (default: 600)
+   abort_pwr_cmd  (optional) AMT command to send if at least one machine
+                             fails to reboot to PXE. possible options:
+                             reset, powerup, powercycle, powerdown
+                             (default: reset)
+
+A flashing script:
+ * inherits environmental variables
+ * may require additional environmental variables
+ * provides additional variables
+
+Additional environmental variables for a script:
+
+   action   determines action to be taken:
+               recv         stdin is the incomming data
+               send         stdout s the outgoing data
+               send-check   validation of parameters
+               send-post    executed after 'send' action
+
+   iface    set in 'recv' action, interface name to act upon
+
+A script is sent to a client.
+A client runs with a 'recv' action only.
+A server runs with a 'send-check', 'send', 'send-post' actions respectively.
+
+EOF
+	exit 1
+}
+
+check_var() {
+	eval "test -z \"\$$1\""
+	test $? -eq 0 && {
+		echo "error: '$1' variable required" >&2
+		echo
+		usage
+		exit 1
+	}
+}
+
+die() {
+	echo "error: $1" >&2
+	exit 1
+}
+
+get_status() {
+	sed '/pt_status:/!d; s/.*pt_status: //; '
+}
+
+# These port number must match with the ports defined in
+# S99flashing script and vice versa.
+discovery_port=32000
+transfer_port=33000
+
+# defaults
+tx_timeout=${tx_timeout:-600}
+abort_power_cmd=${abort_power_cmd:-reset}
+iface_opt=$(test -n "$iface" && echo "-i $iface")
+rx_count=$(echo $machines | xargs -n1 echo | wc -l)
+
+# argument check
+check_var machines
+check_var script
+check_var AMT_PASSWORD
+
+test -e "$script" || die "$script: no such file"
+env action=send-check \
+	sh "$script" \
+	|| die "send-check failed"
+
+echo "Rebooting target machines.." >&2
+for i in $machines
+do
+	echo -n " * $i.. "
+
+	powerstate=$(
+		amttool $i \
+		| grep ^Powerstate: \
+		| awk '{print $2}'
+	)
+
+	cmd=$(
+		case "$powerstate" in
+			S0|S1) echo reset ;;
+			S3|S4|S5) echo powerup ;;
+			*) echo reset
+			   echo -n "[unknown state = $powerstate].. "
+			   ;;
+		esac
+	)
+
+	result=$(
+		yes \
+		| amttool $i $cmd pxe \
+		| get_status
+	)
+
+	case "$result" in
+		success)
+			echo "ok"
+			;;
+		*)
+			echo "error: $result"
+			echo "Aborting. Resetting machines.."
+			for i in $machines
+			do
+				echo -n " * $i.. "
+				echo "$(
+					yes \
+					| amttool "$i" "$abort_power_cmd" \
+					| get_status
+				)"
+			done
+			exit 1
+			;;
+	esac
+done >&2
+
+echo -n "Starting discovery udpcast.. " >&2
+echo -n | udp-sender \
+	--nokbd \
+	--portbase "$discovery_port" \
+	--min-receivers 9999 \
+	$iface_opt \
+	>/dev/null \
+	2>/dev/null \
+	&
+pid=$!
+echo "ok (pid: $pid)" >&2
+
+trap '
+	test -z "$pid" && exit 2
+	echo
+	echo stopping discovery udpcast..
+	kill $pid
+	pid=
+	exit 1
+' INT HUP KILL TERM
+
+
+echo "Starting transfer udpcast.. " >&2
+(
+	cat "$script"
+	echo .
+	env action=send sh "$script"
+) \
+| udp-sender \
+	--nopointopoint \
+	--nokbd \
+	--portbase "$transfer_port" \
+	--min-receivers "$rx_count" \
+	--start-timeout "$tx_timeout" \
+	$iface_opt \
+	|| exit $?
+
+env action=send-post sh "$script"
+kill $pid

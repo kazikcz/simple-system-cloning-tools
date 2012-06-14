@@ -1,0 +1,8 @@
+#!/bin/sh
+export ssh_opts="-i demo-key"
+export image="$1"
+
+./vm-run "
+	echo Removing udev persistence rules..
+	rm /etc/udev/rules.d/*-persistent*
+"

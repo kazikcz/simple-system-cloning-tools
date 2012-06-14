@@ -1,0 +1,165 @@
+#!/bin/sh
+usage() {
+	cat <<EOF >&2
+error: $1
+usage: env option1=value1 option2=value2 $0
+
+Program uses environmental variables for configuration:
+
+   image        (required) path to disk image to boot
+   port         (optional) tcp port for sshd-over-serial on
+                           the host system (default: 35000)
+   ram          (optional) RAM to use for virtual machine [megabytes]
+                           (default: qemu calculates)
+   qemu_opts    (optional) additional QEMU parameters
+   ssh_opts     (optional) additional SSH client parameters
+   boot_timeout (optional) abort if sshd-over-serial
+                           does not respond [seconds] (default: 120)
+   cmd_timeout  (optional) abort if given command
+                           does not respond [seconds]
+   cmd_retry    (optional) retry command N times in case
+                           of ssh communication failure.
+                           (default: 5)
+
+Tip: Consider using 'ram' option.
+Tip: 'port' option may be used to allow concurrent $0 usage.
+
+EOF
+	exit 1
+}
+
+die() {
+	echo "error: $1" >&2
+	exit 1
+}
+
+clean_up() {
+	test -z "$pid" && exit 2
+	kill $pid
+	pid=
+	exit 1
+}
+
+ssh() {
+	command ssh \
+		-o UserKnownHostsFile=/dev/null \
+		-o StrictHostKeyChecking=no \
+		"$@"
+}
+
+qemu() {
+	cmd=$(
+		(
+			which kvm
+			which qemu-kvm
+			which qemu
+			which qemu-system-x86_64
+			which qemu-system-i386
+		) 2>/dev/null | sed 1q
+	)
+
+	if test -e "$cmd"
+	then
+		"$cmd" $no_kvm "$@" &
+		pid=$!
+		echo " $cmd, pid: $pid" >&2
+	else
+		die "QEMU not found" >&2
+	fi
+}
+
+retry() {
+	for i in $(seq 1 $cmd_retry)
+	do
+		test "$i" -gt 1 && echo "Retrying ($i / $cmd_retry).. " >&2
+		"$@"
+		res=$?
+		test "$res" -ne 255 && break
+	done
+	return $?
+}
+
+# defaults
+port=${port:-35000}
+boot_timeout=${boot_timeout:-120}
+cmd_retry=${cmd_retry:-5}
+ram_opt=$(test -n "$ram" && echo "-m $ram")
+
+# checks
+test -n "$image" || usage "image variable required"
+test -e "$image" || usage "$image: does not exist"
+
+echo -n "Starting qemu.." >&2
+qemu \
+	-hda "$image" \
+	-serial tcp::$port,server,nowait \
+	-nographic \
+	-monitor vc \
+	$ram_opt \
+	$qemu_opts
+
+trap clean_up INT HUP KILL TERM EXIT QUIT
+
+echo -n "Waiting for socket.." >&2
+for i in $(seq 1 10)
+do
+	echo -n . >&2
+	netstat -ln \
+		| awk '{print $4}' \
+		| grep "^0.0.0.0:$port$" \
+		>/dev/null \
+		&& break
+	sleep 1
+done
+
+test "$?" -ne 0 && die " timed out"
+echo " ok" >&2
+
+echo -n "Waiting for sshd.. " >&2
+expect -c "
+	set timeout $boot_timeout
+	stty -echo
+	spawn nc localhost $port
+	expect {
+		\"SSH-\" { exit 0 }
+		timeout { exit 1 }
+	}
+" >/dev/null
+
+if test "$?" -ne 0
+then
+	(
+		echo "error: timed out"
+		echo
+		echo "The machine does not respond. "
+		echo "It is suspected to be broken. "
+		echo "Do a manual system check, please. "
+		echo
+	) >&2
+	exit 1
+fi
+echo "ok" >&2
+
+self=$$
+if test -n "$cmd_timeout"
+then
+	echo "Command timeout: $cmd_timeout"
+	(
+		sleep $cmd_timeout
+		echo "..command timeout!"
+		kill $pid
+		kill $self
+	) &
+fi >&2
+
+echo "Sending command: $@.." >&2
+retry ssh localhost -p $port -l root $ssh_opts "$@"
+res=$?
+retry ssh localhost -p $port -l root $ssh_opts halt
+
+echo "Waiting for the machine to halt.." >&2
+wait
+pid=
+
+trap - INT HUP KILL TERM EXIT QUIT
+exit $res

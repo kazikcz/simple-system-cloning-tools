@@ -1,0 +1,72 @@
+#!/bin/sh
+send_port=34000
+
+die() {
+	echo "error: $1"
+	exit 1
+}
+
+reboot() {
+	echo -n "Rebooting in.. "
+	for i in $(seq 10 -1 1)
+	do
+		echo -n "$i.. "
+		sleep 1
+	done
+	echo "now"
+	command reboot
+
+	# fallback for crappy hardware
+	echo "Failed to reboot, trying fallback.."
+	sysctl -w kernel.sysrq=1
+	echo b >/proc/sysrq-trigger
+}
+
+case "$action" in
+recv)
+	echo -n "Detecting available disks.. "
+	disks=$(fdisk -l 2>/dev/null \
+			| grep '^Disk /dev/' \
+			| sed 's/^Disk //; s/:.*//')
+	test "$disks" = "" && die "no disks found"
+	echo "$disks" | sed '1s/^/[/; 1s/$/]/' | xargs
+
+	disk=$(echo "$disks" | sed 1q)
+	bdisk=$(basename "$disk")
+
+	echo -n "Calculating disk tail.. "
+	blocksize=$(cat /sys/block/$bdisk/queue/physical_block_size) \
+		|| die "could not read blocksize of $disk"
+	last_used_sector=$(for i in /sys/block/$bdisk/$bdisk?*
+			do
+				expr `cat $i/start` + `cat $i/size`
+			done | sort -nr | sed 1q) \
+		|| die "could not read last used sector of $disk"
+
+	echo "[last sector = $last_used_sector]"
+
+	echo "Sending $disk .."
+	dd if="$disk" bs=$blocksize count=$last_used_sector \
+	| udp-sender \
+		--interface "$iface" \
+		--min-receivers 1 \
+		--portbase $send_port \
+		--nokbd 
+
+	sync
+	reboot
+	;;
+
+send-check)
+	;;
+
+send)
+	;;
+
+send-post)
+	udp-receiver \
+		--interface "$iface" \
+		--portbase $send_port \
+		--nokbd
+	;;
+esac

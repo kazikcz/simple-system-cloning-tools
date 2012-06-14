@@ -1,0 +1,9 @@
+DEFAULT flasher
+
+LABEL flasher
+	kernel flasher/bzImage
+	append vga=normal initrd=flasher/initrd loglevel=1 console=/dev/ttyS1
+
+# console=tty0
+# console=/dev/ttyS0,38400n8
+# console=/dev/ttyS1

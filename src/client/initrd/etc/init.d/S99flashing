@@ -1,0 +1,114 @@
+#!/bin/sh
+
+# These port numbers must match with the ports defined in
+# net-flash script and vice versa.
+discovery_port=32000
+transfer_port=33000
+
+# Sanity timeouts
+start_timeout=60
+receive_timeout=1
+dhcp_timeout=5
+discovery_timeout=2
+cooldown_wait=5
+
+
+reboot() {
+	echo -n "Rebooting in.. "
+	for i in $(seq 10 -1 1)
+	do
+		echo -n "$i.. "
+		sleep 1
+	done
+	echo "now"
+	command reboot
+
+	# fallback for crappy hardware
+	echo "Failed to reboot, trying fallback.."
+	sysctl -w kernel.sysrq=1
+	echo b >/proc/sysrq-trigger
+}
+
+get_ip() {
+	echo "Obtaining IP addresses: "
+	cd /sys/class/net
+	for i in eth*
+	do
+		if test -e "$i"
+		then
+			echo -n "  $i: "
+			if udhcpc -i "$i" -A0 -t$dhcp_timeout -T1 -n -q -f >/dev/null 2>/dev/null
+			then
+				ip=$(ip addr show dev "$i" \
+						| grep 'inet ' \
+						| awk '{print $2}')
+				echo "$ip"
+			else
+				echo "FAIL."
+			fi
+		else
+			echo "  No interfaces found!"
+			reboot
+		fi
+	done
+}
+
+get_iface() {
+	echo "Probing UDP Cast networks: "
+	iface=
+	for i in eth*
+	do
+		if test -e "$i"
+		then
+			echo -n "  $i: "
+			if udp-receiver \
+					--interface "$i" \
+					--portbase "$discovery_port" \
+					--start-timeout "$discovery_timeout" \
+					>/dev/null \
+					2>/dev/null
+			then
+				echo "OK."
+				iface=$i
+				break
+			else
+				echo "FAIL."
+			fi
+		else
+			echo "  No interfaces found!"
+		fi
+	done
+	export iface
+}
+
+start() {
+	script=/tmp/script
+	echo Initialising transfer
+	udp-receiver \
+			--interface "$iface" \
+			--portbase "$transfer_port" \
+			--start-timeout "$start_timeout" \
+			--receive-timeout "$receive_timeout" \
+			--nokbd \
+			| {
+		echo "  ..downloading profile"
+		while read i
+		do
+			test "$i" = "." && break
+			echo "$i"
+		done > "$script"
+
+		echo "  ..executing profile"
+		env action=recv sh "$script"
+	}
+}
+
+while true
+do
+	clear
+	pidof udpcast | xargs kill 2>/dev/null
+	get_ip
+	get_iface
+	test -n "$iface" && start
+	sleep "$cooldown_wait"
+done

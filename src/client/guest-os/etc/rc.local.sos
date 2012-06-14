@@ -1,0 +1,18 @@
+#!/bin/sh
+# This is /etc/rc.local.sos - sshd over serial script
+#
+# Include this scripts in /etc/rc.local or an equivalent
+
+setsid sh -c '
+	tty=/dev/ttyS0
+	grace_time=5
+
+	echo "Starting SSHD over serial on $tty.."
+	stty <$tty
+	while true
+	do
+		sshd -i -g $grace_time <$tty >$tty
+	done
+' &
+sleep 1
+exit 0

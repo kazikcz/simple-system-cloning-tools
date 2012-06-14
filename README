@@ -1,0 +1,91 @@
+Simple System Cloning and Management scripts
+============================================
+
+
+What is this?
+-------------
+
+A simple set of tools for system cloning using multicasting on a local
+network and system image management using a virtual machine (QEMU)
+e.g. for system image updating. Remote machines are rebooted using
+Intel AMT.
+
+Rebooting with `PXE-boot` using Intel AMT has not been well tested due
+to faulty hardware I had access to. A workaround is to change boot
+order to try PXE first (which has its security issues).
+
+
+Requirements
+------------
+
+ * bash
+ * udp-cast (please use a recent version)
+ * amtterm (please use at least v1.3)
+ * qemu-kvm (non-kvm versions should work too)
+ * dnsmasq (for PXE serving)
+ * tcl/tk expect
+ * OpenSSH (ssh client only)
+
+Note1: Debian (Ubuntu probably too) have old versions of required
+       packages. Make sure to get newer ones.
+Note2: In case of using qemu-kvm WITHOUT kvm modules it is required to
+       pass additional `qemu_opts=-no-kvm`. Otherwise it won't boot.
+
+
+How to use it?
+--------------
+
+An example usage of vm-run:
+
+	env image=archlinux.img vm-run \
+		'pacman -Syu --noconfirm'
+
+An example usage of net-flash:
+
+	# Setup PXE environment using `dnsmasq`
+	dnsmasq -d -F 10.0.0.100,10.0.0.200 \
+		--enable-tftp --tftp-root=/srv/pxe
+
+	# Start flashing procedure
+	#   `script` should point to a script file (one of
+	#            src/server/scripts)
+	#   `machines` is a space-separated list of machines to flash
+	#              (should be list of AMT-remote accessiable addresses!)
+	#   `iface` required if there are more than one interfaces as
+	#           udpcast binds to first one available
+	#   `AMT_PASSWORD` may be set earlier and exported
+	cat archlinux.img \
+		| env AMT_PASSWORD='...' \
+		      iface=eth2 \
+		      script=scripts/send \
+		      machines='10.0.0.151 10.0.0.152 10.0.0.160' \
+		  net-flash
+
+
+Directories:
+------------
+
+	buildroot/.config -- contains configuration used when creating
+	                     initramfs and kernel images for PXE booting
+	src/client/initrd/ -- contains files that need to be put inside
+	                      BUILDROOT_SOURCE/fs/skeleton before building
+	                      images
+	src/client/guest-os/ -- contains example script to use for remote
+	                        management via virtual machine
+	src/server -- contains scripts used for disk image cloning and
+	              management
+	pxe/ -- contains PXE TFTP server contents for booting a machine
+	        into the flashing mode
+
+
+To do:
+------
+
+ - system cloning recovery in case at least one machine fails to
+   receive a complete image
+ - image checksumming
+ - image compression (may yield performance benefits, but may also
+   yield performance degradation)
+ - secure udpcast transfer initialisation using asymmetric keys
+ - expand this README file
+ - smarter interface binding in net-flash (udp-sender)
