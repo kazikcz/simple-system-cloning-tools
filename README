@@ -14,6 +14,10 @@ Rebooting with `PXE-boot` using Intel AMT has not been well tested due
 to faulty hardware I had access to. A workaround is to change boot
 order to try PXE first (which has its security issues).
 
+It has been done as a part of Master's Thesis entitled:
+
+ ,,Reinstalling and updating Linux remotely and automatically''
+
 
 Requirements
 ------------
