@@ -69,17 +69,16 @@ An example usage of net-flash:
 Directories:
 ------------
 
-	buildroot/.config -- contains configuration used when creating
-	                     initramfs and kernel images for PXE booting
-	src/client/initrd/ -- contains files that need to be put inside
-	                      BUILDROOT_SOURCE/fs/skeleton before building
-	                      images
-	src/client/guest-os/ -- contains example script to use for remote
-	                        management via virtual machine
-	src/server -- contains scripts used for disk image cloning and
-	              management
-	pxe/ -- contains PXE TFTP server contents for booting a machine
-	        into the flashing mode
+	src/buildroot/.config -- contains configuration used when creating
+	                         initramfs and kernel images for PXE booting
+	src/buildroot/fs/skeleton -- contains init scripts that are required
+	                             in the initramfs
+	src/guest-os/ -- contains example script to use for remote
+	                 management via virtual machine
+	src/ -- contains scripts used for disk image cloning and
+	        management
+	pxe/ -- contains a prebuilt kernel and initramfs for system cloning
+	        and PXE configuration
 
 
 To do:
