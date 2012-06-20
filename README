@@ -53,7 +53,7 @@ An example usage of net-flash:
 
 	# Start flashing procedure
 	#   `script` should point to a script file (one of
-	#            src/server/scripts)
+	#            src/scripts)
 	#   `machines` is a space-separated list of machines to flash
 	#              (should be list of AMT-remote accessiable addresses!)
 	#   `iface` required if there are more than one interfaces as
