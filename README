@@ -48,6 +48,7 @@ An example usage of net-flash:
 
 	# Setup PXE environment using `dnsmasq`
 	dnsmasq -d -F 10.0.0.100,10.0.0.200 \
+		--dhcp-boot=pxelinux.0 \
 		--enable-tftp --tftp-root=/srv/pxe
 
 	# Start flashing procedure
